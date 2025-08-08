@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -7,29 +7,121 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
-import { Plus, Play, Save, FileText, Zap } from 'lucide-react';
-import { mockScripts, mangaStyles } from '../mock';
+import { Alert, AlertDescription } from './ui/alert';
+import { Plus, Play, Save, FileText, Zap, AlertCircle, CheckCircle } from 'lucide-react';
+import { scriptAPI, handleAPIError } from '../services/api';
+import { useToast } from '../hooks/use-toast';
 
 export default function ScriptEditor({ script, onScriptChange }) {
-  const [title, setTitle] = useState(script.title);
-  const [content, setContent] = useState(script.content);
+  const [title, setTitle] = useState(script?.title || '');
+  const [content, setContent] = useState(script?.content || '');
+  const [style, setStyle] = useState(script?.style || 'shounen');
+  const [scripts, setScripts] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [parseResult, setParseResult] = useState(null);
+  const [error, setError] = useState(null);
+  
+  const { toast } = useToast();
 
-  const handleSave = () => {
-    onScriptChange({
-      ...script,
-      title,
-      content
-    });
+  // Fetch available scripts on component mount
+  useEffect(() => {
+    fetchScripts();
+  }, []);
+
+  const fetchScripts = async () => {
+    try {
+      const fetchedScripts = await scriptAPI.getScripts();
+      setScripts(fetchedScripts);
+    } catch (error) {
+      const errorInfo = handleAPIError(error);
+      toast({
+        title: "Error",
+        description: errorInfo.message,
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleTemplateLoad = (templateId) => {
-    const template = mockScripts.find(s => s.id === templateId);
-    if (template) {
-      setTitle(template.title);
-      setContent(template.content);
-      onScriptChange(template);
+  const handleSave = async () => {
+    if (!title.trim() || !content.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Please provide both title and content",
+        variant: "destructive",
+      });
+      return;
     }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const scriptData = {
+        title: title.trim(),
+        content: content.trim(),
+        style
+      };
+
+      const parsedScript = await scriptAPI.parseScript(scriptData);
+      setParseResult(parsedScript);
+      
+      // Update parent component
+      onScriptChange(parsedScript);
+      
+      // Refresh scripts list
+      fetchScripts();
+      
+      toast({
+        title: "Success",
+        description: "Script parsed and saved successfully!",
+      });
+      
+    } catch (error) {
+      const errorInfo = handleAPIError(error);
+      setError(errorInfo.message);
+      toast({
+        title: "Error",
+        description: errorInfo.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTemplateLoad = async (scriptId) => {
+    if (!scriptId) return;
+
+    try {
+      const selectedScript = await scriptAPI.getScript(scriptId);
+      setTitle(selectedScript.title);
+      setContent(selectedScript.content);
+      setStyle(selectedScript.style);
+      setParseResult(selectedScript);
+      onScriptChange(selectedScript);
+      
+      toast({
+        title: "Template Loaded",
+        description: `Loaded "${selectedScript.title}"`,
+      });
+    } catch (error) {
+      const errorInfo = handleAPIError(error);
+      toast({
+        title: "Error",
+        description: errorInfo.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const addSceneTemplate = () => {
+    const template = `
+[SCENE: Location - Time]
+[CHARACTER: Name - Description]
+[ACTION: Description]
+[DIALOGUE: Character] "Text"`;
+    setContent(content + template);
   };
 
   const getTagColor = (tag) => {
@@ -45,8 +137,8 @@ export default function ScriptEditor({ script, onScriptChange }) {
   return (
     <div className="space-y-6">
       {/* Header Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
             <Label htmlFor="title">Title</Label>
             <Input
@@ -57,6 +149,23 @@ export default function ScriptEditor({ script, onScriptChange }) {
               placeholder="Enter manga title..."
             />
           </div>
+          
+          <div className="flex items-center gap-2">
+            <Label htmlFor="style">Style</Label>
+            <Select value={style} onValueChange={setStyle}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="shounen">Shounen</SelectItem>
+                <SelectItem value="shoujo">Shoujo</SelectItem>
+                <SelectItem value="seinen">Seinen</SelectItem>
+                <SelectItem value="comedy">Comedy</SelectItem>
+                <SelectItem value="horror">Horror</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
           <div className="flex items-center gap-2">
             <Label>Template</Label>
             <Select value={selectedTemplate} onValueChange={handleTemplateLoad}>
@@ -64,9 +173,9 @@ export default function ScriptEditor({ script, onScriptChange }) {
                 <SelectValue placeholder="Load template..." />
               </SelectTrigger>
               <SelectContent>
-                {mockScripts.map(template => (
-                  <SelectItem key={template.id} value={template.id}>
-                    {template.title}
+                {scripts.map(script => (
+                  <SelectItem key={script.id} value={script.id}>
+                    {script.title}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -75,16 +184,43 @@ export default function ScriptEditor({ script, onScriptChange }) {
         </div>
         
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={handleSave} className="gap-2">
-            <Save className="w-4 h-4" />
-            Save
-          </Button>
-          <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700">
-            <Play className="w-4 h-4" />
-            Parse Script
+          <Button 
+            onClick={handleSave} 
+            disabled={isLoading}
+            className="gap-2 bg-emerald-600 hover:bg-emerald-700"
+          >
+            {isLoading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Parsing...
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4" />
+                Parse & Save
+              </>
+            )}
           </Button>
         </div>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Success Display */}
+      {parseResult && !error && (
+        <Alert className="border-green-200 bg-green-50">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800">
+            Script parsed successfully! Found {parseResult.parsed_data?.total_scenes || 0} scenes and {parseResult.parsed_data?.character_list?.length || 0} characters.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Script Input */}
@@ -164,7 +300,7 @@ export default function ScriptEditor({ script, onScriptChange }) {
                 variant="outline" 
                 size="sm" 
                 className="w-full justify-start gap-2 border-emerald-200 hover:bg-emerald-100"
-                onClick={() => setContent(content + '\n[SCENE: Location - Time]\n[CHARACTER: Name - Description]\n[ACTION: Description]\n[DIALOGUE: Character] "Text"')}
+                onClick={addSceneTemplate}
               >
                 <Plus className="w-4 h-4" />
                 Add Scene Template
@@ -173,12 +309,59 @@ export default function ScriptEditor({ script, onScriptChange }) {
                 variant="outline" 
                 size="sm" 
                 className="w-full justify-start gap-2 border-emerald-200 hover:bg-emerald-100"
+                onClick={() => document.getElementById('file-input')?.click()}
               >
                 <FileText className="w-4 h-4" />
                 Import from File
               </Button>
+              <input
+                id="file-input"
+                type="file"
+                accept=".txt,.md"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => setContent(e.target.result);
+                    reader.readAsText(file);
+                  }
+                }}
+              />
             </div>
           </Card>
+
+          {/* Parse Results Preview */}
+          {parseResult && parseResult.parsed_data && (
+            <Card className="p-4 bg-indigo-50 border-indigo-200">
+              <h4 className="font-semibold mb-3 text-indigo-800">Parse Results</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>Total Scenes:</span>
+                  <span className="font-medium">{parseResult.parsed_data.total_scenes}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Characters:</span>
+                  <span className="font-medium">{parseResult.parsed_data.character_list?.length || 0}</span>
+                </div>
+                <div className="mt-2">
+                  <span className="text-indigo-700">Characters found:</span>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {parseResult.parsed_data.character_list?.slice(0, 5).map((char, index) => (
+                      <Badge key={index} variant="secondary" className="text-xs">
+                        {char}
+                      </Badge>
+                    ))}
+                    {parseResult.parsed_data.character_list?.length > 5 && (
+                      <Badge variant="secondary" className="text-xs">
+                        +{parseResult.parsed_data.character_list.length - 5}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </div>
