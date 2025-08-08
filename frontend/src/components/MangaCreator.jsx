@@ -5,24 +5,62 @@ import ScriptEditor from './ScriptEditor';
 import MangaPreview from './MangaPreview';
 import StyleSelector from './StyleSelector';
 import CharacterManager from './CharacterManager';
-import { BookOpen, Palette, Users, Download } from 'lucide-react';
+import { BookOpen, Palette, Users, Download, Zap } from 'lucide-react';
 import { Button } from './ui/button';
-import { mockScripts } from '../mock';
+import { useToast } from '../hooks/use-toast';
+import { Toaster } from './ui/toaster';
 
 export default function MangaCreator() {
-  const [currentScript, setCurrentScript] = useState(mockScripts[0]);
+  const [currentScript, setCurrentScript] = useState(null);
   const [selectedStyle, setSelectedStyle] = useState('shounen');
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState('script');
+  const [generationTriggered, setGenerationTriggered] = useState(false);
+
+  const { toast } = useToast();
 
   const handleGenerate = () => {
+    if (!currentScript) {
+      toast({
+        title: "No Script Available",
+        description: "Please create and parse a script first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!currentScript.parsed_data || !currentScript.parsed_data.scenes) {
+      toast({
+        title: "Script Not Parsed",
+        description: "Please parse your script before generating manga",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGenerating(true);
-    // Mock generation process
-    setTimeout(() => {
-      setIsGenerating(false);
-      setActiveTab('preview');
-    }, 3000);
+    setGenerationTriggered(prev => !prev); // Toggle to trigger generation
+    setActiveTab('preview');
+    
+    toast({
+      title: "Generation Started",
+      description: "Your manga is being generated. Check the Preview tab for progress.",
+    });
   };
+
+  const handleGenerationComplete = (result) => {
+    setIsGenerating(false);
+    toast({
+      title: "Generation Complete",
+      description: "Your manga has been successfully generated!",
+    });
+  };
+
+  const handleScriptChange = (newScript) => {
+    setCurrentScript(newScript);
+  };
+
+  const canGenerate = currentScript && currentScript.parsed_data && currentScript.parsed_data.scenes;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -41,12 +79,22 @@ export default function MangaCreator() {
           <div className="flex items-center gap-3">
             <Button 
               onClick={handleGenerate}
-              disabled={isGenerating}
-              className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
+              disabled={isGenerating || !canGenerate}
+              className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 gap-2"
             >
-              {isGenerating ? 'Generating...' : 'Generate Manga'}
+              {isGenerating ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4" />
+                  Generate Manga
+                </>
+              )}
             </Button>
-            <Button variant="outline" className="gap-2">
+            <Button variant="outline" className="gap-2" disabled>
               <Download className="w-4 h-4" />
               Export
             </Button>
@@ -83,7 +131,7 @@ export default function MangaCreator() {
               <TabsContent value="script" className="mt-0">
                 <ScriptEditor 
                   script={currentScript}
-                  onScriptChange={setCurrentScript}
+                  onScriptChange={handleScriptChange}
                 />
               </TabsContent>
 
@@ -102,13 +150,17 @@ export default function MangaCreator() {
                 <MangaPreview 
                   script={currentScript}
                   style={selectedStyle}
-                  isGenerating={isGenerating}
+                  isGenerating={generationTriggered}
+                  onGenerationComplete={handleGenerationComplete}
                 />
               </TabsContent>
             </div>
           </Tabs>
         </Card>
       </main>
+
+      {/* Toast Notifications */}
+      <Toaster />
     </div>
   );
 }
